@@ -48,15 +48,3 @@ jobs:
             ghcr.io/${{ github.repository }}:${{ steps.tag.outputs.image_tag }}
           cache-from: type=gha,scope=build
           cache-to: type=gha,mode=max,scope=build
-
-      - name: Build runtime image
-        uses: docker/build-push-action@v5
-        with:
-          builder: ${{ steps.buildx.outputs.name }}
-          push: ${{ steps.tag.outputs.do_push }}
-          tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ steps.tag.outputs.image_tag }}.runtime
-          target: runtime
-          cache-from: type=gha,scope=build
-          cache-to: type=gha,mode=max,scope=build
