@@ -8,6 +8,8 @@ RUN apt-get update && apt-get install -y \
     curl \
     locales \
     sudo \
+    git \
+    git-lfs \
     libx11-6 \
     libxcb1 \
     libxkbcommon0 \
@@ -19,7 +21,14 @@ RUN apt-get update && apt-get install -y \
     libgl1 \
     libxext6 \
     dbus \
-    libdbus-1-3
+    libdbus-1-3 \
+    build-essential \
+    python3 \
+    python3-pip \
+    nodejs \
+    npm \
+    ripgrep \
+    fd-find
 
 RUN sed -i -e 's/# en_GB.UTF-8 UTF-8/en_GB.UTF-8 UTF-8/' /etc/locale.gen && \
     dpkg-reconfigure --frontend=noninteractive locales && \
