@@ -47,6 +47,15 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 RUN curl -LsSf https://download.docker.com/linux/static/stable/x86_64/docker-24.0.2.tgz | tar -xz -C /usr/local/bin --strip-components=1 docker/docker
 RUN curl -LsSf https://github.com/docker/compose/releases/download/v2.20.2/docker-compose-linux-x86_64 -o /usr/local/bin/docker-compose && chmod +x /usr/local/bin/docker-compose
 
+# Install devcontainer CLI
+RUN npm install -g @devcontainers/cli
+
+# Ensure directories exist with proper permissions for devcontainer
+RUN mkdir -p /root/.config /root/Documents && chmod 777 /root/.config /root/Documents
+
+# Ensure directories exist with proper permissions for devcontainer
+RUN mkdir -p /root/Documents && chmod 755 /root/Documents
+
 # Use C locale to avoid xkbcommon keysym issues
 ENV LANG C
 ENV LC_ALL C
