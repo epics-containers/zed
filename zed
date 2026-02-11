@@ -8,12 +8,20 @@ thisdir=$(realpath $(dirname ${0}))
 docker=podman
 args="--security-opt=label=type:container_runtime_t"
 
-# Check for --last-build flag to use cached image instead of pulling from ghcr
+# Check for options
 use_cache=false
+force_x11=false
+force_wayland=false
 filtered_args=""
 for arg in "$@"; do
-  if [ "$arg" = "--last-build" ]; then
+  if [ "$arg" = "--local" ]; then
     use_cache=true
+  elif [ "$arg" = "--x11" ]; then
+    force_x11=true
+    force_wayland=false
+  elif [ "$arg" = "--wayland" ]; then
+    force_wayland=true
+    force_x11=false
   else
     filtered_args="$filtered_args $arg"
   fi
@@ -21,30 +29,69 @@ done
 
 # Select image and pull policy
 if [ "$use_cache" = true ]; then
-  image=$(podman images --format "{{.Repository}}:{{.Tag}}" | grep "zed:main" | head -1)
+  image=local-zed:latest
   pull_policy="--pull never"
 else
   image="ghcr.io/epics-containers/zed:main"
   pull_policy="--pull newer"
 fi
 
-XSOCK=/tmp/.X11-unix # X11 socket (but we mount the whole of tmp)
-XAUTH=/tmp/.container.xauth.$USER
-touch $XAUTH
-xauth nlist $DISPLAY | sed -e 's/^..../ffff/' | xauth -f $XAUTH nmerge -
-chmod 777 $XAUTH
-
-x11="
+# Detect display server (X11 or Wayland)
+# Wayland forwarding in containers is unreliable, so we default to X11 even if Wayland
+# is available on the host. Use --wayland flag to explicitly enable Wayland.
+if [ -n "$WAYLAND_DISPLAY" ] && [ "$force_wayland" = true ]; then
+  # Explicit Wayland request - mount the entire XDG_RUNTIME_DIR for socket access
+  display_setup="
+-e WAYLAND_DISPLAY=$WAYLAND_DISPLAY
+-v ${XDG_RUNTIME_DIR}:${XDG_RUNTIME_DIR}
+"
+else
+  # Default to X11 setup (native X11 or Wayland host with XWayland fallback)
+  XSOCK=/tmp/.X11-unix # X11 socket (but we mount the whole of tmp)
+  XAUTH=/tmp/.container.xauth.$USER
+  touch $XAUTH
+  xauth nlist $DISPLAY | sed -e 's/^..../ffff/' | xauth -f $XAUTH nmerge -
+  chmod 777 $XAUTH
+  display_setup="
 -e DISPLAY
 -v $XAUTH:$XAUTH
 -e XAUTHORITY=$XAUTH
+"
+fi
+
+# Common display settings
+x11="
 -v /usr/share/icons:/usr/share/icons:ro
--v /usr/share/X11:/usr/share/X11:ro
+${display_setup}
+-e LANG=C
+-e LC_ALL=C
 --net host
 "
 
+# Add X11-specific settings (used by default, or when Wayland is unavailable)
+if ([ "$force_wayland" != true ] || [ -z "$WAYLAND_DISPLAY" ]) && [ -n "$DISPLAY" ]; then
+  x11="${x11} -e GDK_BACKEND=x11
+-e QT_QPA_PLATFORM=xcb
+-e ZED_DISABLE_HANG_DETECTION=1
+-e RUST_LOG=error
+"
+fi
+
+# Mount DBus socket for desktop integration if available
+# This helps with window server integration and notifications
+if [ -n "$DBUS_SESSION_BUS_ADDRESS" ]; then
+  dbus_socket=$(echo $DBUS_SESSION_BUS_ADDRESS | sed 's/unix:path=//')
+  if [ -S "$dbus_socket" ]; then
+    x11="${x11} -v=${dbus_socket}:${dbus_socket}
+-e DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS}
+"
+  fi
+fi
+
 args=${args}"
 -it
+--rm
+--privileged
 ${pull_policy}
 "
 
@@ -53,6 +100,15 @@ MYHOME=/home/${USER}
 # also mount in the podman socket as the default Docker socket
 # for podman-outside-docker
 mounts="-v=/tmp:/tmp"
+
+# Mount GPU devices for hardware-accelerated rendering
+if [ -d /dev/dri ]; then
+  mounts="${mounts} --device /dev/dri:/dev/dri"
+fi
+# NVIDIA GPU support via CDI (requires nvidia-container-toolkit)
+if [ -e /dev/nvidia0 ]; then
+  mounts="${mounts} --device nvidia.com/gpu=all"
+fi
 
 # Add mounts only if they exist
 [ -d /scratch ] && mounts="${mounts} -v=/scratch:/scratch"
@@ -69,8 +125,10 @@ mounts="${mounts} -v=zed-state:/root/.local/share/zed"
 mounts="${mounts} -v=${MYHOME}:${MYHOME}"
 mounts="${mounts} -v=${thisdir}:/workspace"
 
-
-xhost +SI:localuser:$(id -un)
+# Grant X11 access for local user (we default to X11)
+if [ -n "$DISPLAY" ] && [ "$force_wayland" != true ]; then
+  xhost +SI:localuser:$(id -un) 2>/dev/null || true
+fi
 
 set -x
 $docker run ${mounts} ${args} ${x11} ${filtered_args} ${image}
