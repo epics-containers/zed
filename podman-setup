@@ -1,0 +1,42 @@
+#!/bin/bash
+
+# Setup script for podman 5.0+ socket idle timeout issue
+# Required for persistent podman socket when using podman-outside-podman
+
+set -e
+
+echo "Configuring podman socket for persistent availability..."
+
+# Create systemd override directories
+mkdir -p ~/.config/systemd/user/podman.socket.d
+mkdir -p ~/.config/systemd/user/podman.service.d
+
+# Create socket override to remove idle timeout
+cat > ~/.config/systemd/user/podman.socket.d/override.conf <<'EOF'
+[Socket]
+# Remove idle timeout - keep socket listening indefinitely
+TimeoutIdleSec=0
+EOF
+
+# Create service override for safety
+cat > ~/.config/systemd/user/podman.service.d/override.conf <<'EOF'
+[Service]
+# Remove idle timeout to keep socket available
+TimeoutStopSec=infinity
+TimeoutIdleUSec=infinity
+EOF
+
+# Reload systemd and restart podman
+systemctl --user daemon-reload
+systemctl --user restart podman.socket
+systemctl --user restart podman.service
+
+# Verify socket is available
+sleep 1
+if [ -S "$XDG_RUNTIME_DIR/podman/podman.sock" ]; then
+    echo "✓ Podman socket configured successfully"
+    ls -la "$XDG_RUNTIME_DIR/podman/podman.sock"
+else
+    echo "✗ Socket not found. Check systemctl --user status podman.socket"
+    exit 1
+fi

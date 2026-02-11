@@ -10,18 +10,10 @@ args="--security-opt=label=type:container_runtime_t"
 
 # Check for options
 use_cache=false
-force_x11=false
-force_wayland=false
 filtered_args=""
 for arg in "$@"; do
   if [ "$arg" = "--local" ]; then
     use_cache=true
-  elif [ "$arg" = "--x11" ]; then
-    force_x11=true
-    force_wayland=false
-  elif [ "$arg" = "--wayland" ]; then
-    force_wayland=true
-    force_x11=false
   else
     filtered_args="$filtered_args $arg"
   fi
@@ -36,28 +28,17 @@ else
   pull_policy="--pull newer"
 fi
 
-# Detect display server (X11 or Wayland)
-# Wayland forwarding in containers is unreliable, so we default to X11 even if Wayland
-# is available on the host. Use --wayland flag to explicitly enable Wayland.
-if [ -n "$WAYLAND_DISPLAY" ] && [ "$force_wayland" = true ]; then
-  # Explicit Wayland request - mount the entire XDG_RUNTIME_DIR for socket access
-  display_setup="
--e WAYLAND_DISPLAY=$WAYLAND_DISPLAY
--v ${XDG_RUNTIME_DIR}:${XDG_RUNTIME_DIR}
-"
-else
-  # Default to X11 setup (native X11 or Wayland host with XWayland fallback)
-  XSOCK=/tmp/.X11-unix # X11 socket (but we mount the whole of tmp)
-  XAUTH=/tmp/.container.xauth.$USER
-  touch $XAUTH
-  xauth nlist $DISPLAY | sed -e 's/^..../ffff/' | xauth -f $XAUTH nmerge -
-  chmod 777 $XAUTH
-  display_setup="
+# Setup X11 forwarding
+XSOCK=/tmp/.X11-unix # X11 socket (but we mount the whole of tmp)
+XAUTH=/tmp/.container.xauth.$USER
+touch $XAUTH
+xauth nlist $DISPLAY | sed -e 's/^..../ffff/' | xauth -f $XAUTH nmerge -
+chmod 777 $XAUTH
+display_setup="
 -e DISPLAY
 -v $XAUTH:$XAUTH
 -e XAUTHORITY=$XAUTH
 "
-fi
 
 # Common display settings
 x11="
@@ -68,8 +49,8 @@ ${display_setup}
 --net host
 "
 
-# Add X11-specific settings (used by default, or when Wayland is unavailable)
-if ([ "$force_wayland" != true ] || [ -z "$WAYLAND_DISPLAY" ]) && [ -n "$DISPLAY" ]; then
+# Add X11 environment settings
+if [ -n "$DISPLAY" ]; then
   x11="${x11} -e GDK_BACKEND=x11
 -e QT_QPA_PLATFORM=xcb
 -e ZED_DISABLE_HANG_DETECTION=1
@@ -125,10 +106,15 @@ mounts="${mounts} -v=zed-state:/root/.local/share/zed"
 mounts="${mounts} -v=${MYHOME}:${MYHOME}"
 mounts="${mounts} -v=${thisdir}:/workspace"
 
-# Grant X11 access for local user (we default to X11)
-if [ -n "$DISPLAY" ] && [ "$force_wayland" != true ]; then
+# Grant X11 access for local user
+if [ -n "$DISPLAY" ]; then
   xhost +SI:localuser:$(id -un) 2>/dev/null || true
 fi
+
+# Keep podman service alive during container execution
+podman ps > /dev/null 2>&1 &
+PODMAN_PID=$!
+trap "kill $PODMAN_PID 2>/dev/null" EXIT
 
 set -x
 $docker run ${mounts} ${args} ${x11} ${filtered_args} ${image}

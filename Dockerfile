@@ -14,8 +14,6 @@ RUN apt-get update && apt-get install -y \
     libxcb1 \
     libxkbcommon0 \
     libxkbcommon-x11-0 \
-    libwayland-client0 \
-    libwayland-cursor0 \
     libxrender1 \
     libxrandr2 \
     x11-xkb-utils \
@@ -54,7 +52,7 @@ ENV LANG C
 ENV LC_ALL C
 ENV ZED_ALLOW_EMULATED_GPU=1
 ENV ZED_ALLOW_ROOT=true
-# Default to X11 rendering (Wayland forwarding through containers is problematic)
+# X11-only rendering environment
 ENV GDK_BACKEND=x11
 ENV QT_QPA_PLATFORM=xcb
 # Disable hang detection - first frame can be slow
