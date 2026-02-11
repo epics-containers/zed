@@ -8,11 +8,11 @@ thisdir=$(realpath $(dirname ${0}))
 docker=podman
 args="--security-opt=label=type:container_runtime_t"
 
-# Check for --last-build flag to use cached image instead of pulling from ghcr
+# Check for options
 use_cache=false
 filtered_args=""
 for arg in "$@"; do
-  if [ "$arg" = "--last-build" ]; then
+  if [ "$arg" = "--local" ]; then
     use_cache=true
   else
     filtered_args="$filtered_args $arg"
@@ -21,56 +21,103 @@ done
 
 # Select image and pull policy
 if [ "$use_cache" = true ]; then
-  image=$(podman images --format "{{.Repository}}:{{.Tag}}" | grep "zed:main" | head -1)
+  image=local-zed:latest
   pull_policy="--pull never"
 else
   image="ghcr.io/epics-containers/zed:main"
   pull_policy="--pull newer"
 fi
 
+# Setup X11 forwarding
 XSOCK=/tmp/.X11-unix # X11 socket (but we mount the whole of tmp)
 XAUTH=/tmp/.container.xauth.$USER
 touch $XAUTH
 xauth nlist $DISPLAY | sed -e 's/^..../ffff/' | xauth -f $XAUTH nmerge -
 chmod 777 $XAUTH
-
-x11="
+display_setup="
 -e DISPLAY
 -v $XAUTH:$XAUTH
 -e XAUTHORITY=$XAUTH
+"
+
+# Common display settings
+x11="
 -v /usr/share/icons:/usr/share/icons:ro
--v /usr/share/X11:/usr/share/X11:ro
+${display_setup}
 --net host
 "
 
+
+# Mount DBus socket for desktop integration if available
+# This helps with window server integration and notifications
+if [ -n "$DBUS_SESSION_BUS_ADDRESS" ]; then
+  dbus_socket=$(echo $DBUS_SESSION_BUS_ADDRESS | sed 's/unix:path=//')
+  if [ -S "$dbus_socket" ]; then
+    x11="${x11} -v=${dbus_socket}:${dbus_socket}
+-e DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS}
+"
+  fi
+fi
+
 args=${args}"
 -it
+--rm
+--privileged
 ${pull_policy}
 "
 
 MYHOME=/home/${USER}
+# Set HOME to the real user's home so that devcontainer CLI's ${localEnv:HOME}
+# resolves to paths the host podman daemon can access
+args="${args} -e HOME=${MYHOME}"
 # mount in your own home dir in same folder for access to external files
 # also mount in the podman socket as the default Docker socket
 # for podman-outside-docker
 mounts="-v=/tmp:/tmp"
 
+# Mount GPU devices for hardware-accelerated rendering
+if [ -d /dev/dri ]; then
+  mounts="${mounts} --device /dev/dri:/dev/dri"
+fi
+# NVIDIA GPU support via CDI (requires nvidia-container-toolkit)
+if [ -e /dev/nvidia0 ]; then
+  mounts="${mounts} --device nvidia.com/gpu=all"
+fi
+
 # Add mounts only if they exist
 [ -d /scratch ] && mounts="${mounts} -v=/scratch:/scratch"
 [ -d /dls_sw ] && mounts="${mounts} -v=/dls_sw:/dls_sw"
-[ -d ${MYHOME}/.ssh ] && mounts="${mounts} -v=${MYHOME}/.ssh:/root/.ssh"
-[ -d ${MYHOME}/.config ] && mounts="${mounts} -v=${MYHOME}/.config:/root/.config"
+[ -d ${MYHOME}/.ssh ] && mounts="${mounts} -v=${MYHOME}/.ssh:${MYHOME}/.ssh"
+# Forward SSH agent for git authentication
+if [ -n "$SSH_AUTH_SOCK" ]; then
+  mounts="${mounts} -v=${SSH_AUTH_SOCK}:${SSH_AUTH_SOCK} -e SSH_AUTH_SOCK=${SSH_AUTH_SOCK}"
+fi
+# Use named volume for .config to allow devcontainer CLI to create its own structure
+# while maintaining persistence across runs
+mounts="${mounts} -v=zed-config:${MYHOME}/.config"
 # mount in the podman socket if it exists, for podman-outside-docker support
 [ -S ${XDG_RUNTIME_DIR}/podman/podman.sock ] && mounts="${mounts} -v=${XDG_RUNTIME_DIR}/podman/podman.sock:/var/run/docker.sock"
 # Always add these mounts, make cache and state be named volumes so they persist
 # across runs and don't require the host directories to exist (I also found
 # that this improves performance)
-mounts="${mounts} -v=zed-cache:/root/.cache"
-mounts="${mounts} -v=zed-state:/root/.local/share/zed"
-mounts="${mounts} -v=${MYHOME}:${MYHOME}"
+mounts="${mounts} -v=zed-cache:${MYHOME}/.cache"
+mounts="${mounts} -v=zed-state:${MYHOME}/.local/share/zed"
 mounts="${mounts} -v=${thisdir}:/workspace"
+mounts="${mounts} -v=${MYHOME}:${MYHOME}"
+# Override host .bashrc with container-specific version
+mounts="${mounts} -v=${thisdir}/bashrc:${MYHOME}/.bashrc:ro"
+# mount in code config for VS Code so we can copy its settings
+[ -d ${MYHOME}/.config/Code ] && mounts="${mounts} -v=${MYHOME}/.config/Code:${MYHOME}/.config/Code:ro"
 
+# Grant X11 access for local user
+if [ -n "$DISPLAY" ]; then
+  xhost +SI:localuser:$(id -un) 2>/dev/null || true
+fi
 
-xhost +SI:localuser:$(id -un)
+# Keep podman service alive during container execution
+podman ps > /dev/null 2>&1 &
+PODMAN_PID=$!
+trap "kill $PODMAN_PID 2>/dev/null" EXIT
 
 set -x
 $docker run ${mounts} ${args} ${x11} ${filtered_args} ${image}

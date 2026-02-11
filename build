@@ -1,0 +1,11 @@
+#!/bin/bash
+
+# Build script for zed container image
+
+thisdir=$(realpath $(dirname ${0}))
+
+# assume podman for now - change this to docker if needed
+docker=podman
+
+set -x
+$docker build -t local-zed:latest -t local-zed:$(date +%Y%m%d-%H%M%S) ${thisdir}
