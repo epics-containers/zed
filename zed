@@ -29,10 +29,18 @@ args=${args}"
 
 export MYHOME=/home/${USER}
 # mount in your own home dir in same folder for access to external files
+# also mount in the podman socket as the default Docker socket
+# for podman-outside-docker
 mounts="
 -v=/tmp:/tmp
 -v=${MYHOME}/.ssh:/root/.ssh
+-v=${MYHOME}/.config:/root/.config
+-v=${MYHOME}/.cache:/root/.cache
+-v=${MYHOME}:${MYHOME}
+-v=/scratch:/scratch
+-v=/dls_sw:/dls_sw
 -v=${thisdir}:/workspace
+-v=${XDG_RUNTIME_DIR}/podman/podman.sock:/var/run/docker.sock
 "
 
 xhost +SI:localuser:$(id -un)
