@@ -33,8 +33,6 @@ RUN curl -LsSf https://download.docker.com/linux/static/stable/x86_64/docker-24.
 RUN curl -LsSf https://github.com/docker/compose/releases/download/v2.20.2/docker-compose-linux-x86_64 -o /usr/local/bin/docker-compose && chmod +x /usr/local/bin/docker-compose
 
 ENV LANG en_GB.UTF-8
-ENV DBUS_SYSTEM_BUS_ADDRESS=unix:path=/run/dbus/system_bus_socket
-ENV XCOMPOSEFILE=/dev/null
 ENV ZED_ALLOW_EMULATED_GPU=1
 ENV ZED_ALLOW_ROOT=true
 

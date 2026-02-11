@@ -18,7 +18,8 @@ x11="
 -e DISPLAY
 -v $XAUTH:$XAUTH
 -e XAUTHORITY=$XAUTH
--v /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
+-v /usr/share/icons:/usr/share/icons:ro
+-v /usr/share/X11:/usr/share/X11:ro
 --net host
 "
 
@@ -35,7 +36,8 @@ mounts="
 -v=/tmp:/tmp
 -v=${MYHOME}/.ssh:/root/.ssh
 -v=${MYHOME}/.config:/root/.config
--v=${MYHOME}/.cache:/root/.cache
+-v=zed-cache:/root/.cache
+-v=zed-state:/root/.local/share/zed
 -v=${MYHOME}:${MYHOME}
 -v=/scratch:/scratch
 -v=/dls_sw:/dls_sw
@@ -46,4 +48,4 @@ mounts="
 xhost +SI:localuser:$(id -un)
 
 set -x
-$docker run ${mounts} ${args} ${x11} ${@} ghcr.io/epics-containers/zed:latest
+$docker run ${mounts} ${args} ${x11} ${@} ghcr.io/epics-containers/zed:main
