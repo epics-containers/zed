@@ -8,6 +8,26 @@ thisdir=$(realpath $(dirname ${0}))
 docker=podman
 args="--security-opt=label=type:container_runtime_t"
 
+# Check for --last-build flag to use cached image instead of pulling from ghcr
+use_cache=false
+filtered_args=""
+for arg in "$@"; do
+  if [ "$arg" = "--last-build" ]; then
+    use_cache=true
+  else
+    filtered_args="$filtered_args $arg"
+  fi
+done
+
+# Select image and pull policy
+if [ "$use_cache" = true ]; then
+  image=$(podman images --format "{{.Repository}}:{{.Tag}}" | grep "zed:main" | head -1)
+  pull_policy="--pull never"
+else
+  image="ghcr.io/epics-containers/zed:main"
+  pull_policy="--pull newer"
+fi
+
 XSOCK=/tmp/.X11-unix # X11 socket (but we mount the whole of tmp)
 XAUTH=/tmp/.container.xauth.$USER
 touch $XAUTH
@@ -25,27 +45,32 @@ x11="
 
 args=${args}"
 -it
---pull newer
+${pull_policy}
 "
 
-export MYHOME=/home/${USER}
+MYHOME=/home/${USER}
 # mount in your own home dir in same folder for access to external files
 # also mount in the podman socket as the default Docker socket
 # for podman-outside-docker
-mounts="
--v=/tmp:/tmp
--v=${MYHOME}/.ssh:/root/.ssh
--v=${MYHOME}/.config:/root/.config
--v=zed-cache:/root/.cache
--v=zed-state:/root/.local/share/zed
--v=${MYHOME}:${MYHOME}
--v=/scratch:/scratch
--v=/dls_sw:/dls_sw
--v=${thisdir}:/workspace
--v=${XDG_RUNTIME_DIR}/podman/podman.sock:/var/run/docker.sock
-"
+mounts="-v=/tmp:/tmp"
+
+# Add mounts only if they exist
+[ -d /scratch ] && mounts="${mounts} -v=/scratch:/scratch"
+[ -d /dls_sw ] && mounts="${mounts} -v=/dls_sw:/dls_sw"
+[ -d ${MYHOME}/.ssh ] && mounts="${mounts} -v=${MYHOME}/.ssh:/root/.ssh"
+[ -d ${MYHOME}/.config ] && mounts="${mounts} -v=${MYHOME}/.config:/root/.config"
+# mount in the podman socket if it exists, for podman-outside-docker support
+[ -S ${XDG_RUNTIME_DIR}/podman/podman.sock ] && mounts="${mounts} -v=${XDG_RUNTIME_DIR}/podman/podman.sock:/var/run/docker.sock"
+# Always add these mounts, make cache and state be named volumes so they persist
+# across runs and don't require the host directories to exist (I also found
+# that this improves performance)
+mounts="${mounts} -v=zed-cache:/root/.cache"
+mounts="${mounts} -v=zed-state:/root/.local/share/zed"
+mounts="${mounts} -v=${MYHOME}:${MYHOME}"
+mounts="${mounts} -v=${thisdir}:/workspace"
+
 
 xhost +SI:localuser:$(id -un)
 
 set -x
-$docker run ${mounts} ${args} ${x11} ${@} ghcr.io/epics-containers/zed:main
+$docker run ${mounts} ${args} ${x11} ${filtered_args} ${image}
