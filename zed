@@ -75,15 +75,6 @@ args="${args} -e HOME=${MYHOME}"
 # for podman-outside-docker
 mounts="-v=/tmp:/tmp"
 
-# Mount GPU devices for hardware-accelerated rendering
-if [ -d /dev/dri ]; then
-  mounts="${mounts} --device /dev/dri:/dev/dri"
-fi
-# NVIDIA GPU support via CDI (requires nvidia-container-toolkit)
-if [ -e /dev/nvidia0 ]; then
-  mounts="${mounts} --device nvidia.com/gpu=all"
-fi
-
 # Add mounts only if they exist
 [ -d /scratch ] && mounts="${mounts} -v=/scratch:/scratch"
 [ -d /dls_sw ] && mounts="${mounts} -v=/dls_sw:/dls_sw"
