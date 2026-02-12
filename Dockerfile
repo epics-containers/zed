@@ -53,9 +53,6 @@ RUN npm install -g @devcontainers/cli
 # Ensure directories exist with proper permissions for devcontainer
 RUN mkdir -p /root/.config /root/Documents && chmod 777 /root/.config /root/Documents
 
-# Ensure directories exist with proper permissions for devcontainer
-RUN mkdir -p /root/Documents && chmod 755 /root/Documents
-
 # Use C locale to avoid xkbcommon keysym issues
 ENV LANG C
 ENV LC_ALL C

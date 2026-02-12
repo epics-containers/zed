@@ -67,7 +67,7 @@ ${pull_policy}
 "
 
 MYHOME=/home/${USER}
-# Set HOME to the real user's home so that devcontainer CLI's ${localEnv:HOME}
+# Set HOME to real user's home so devcontainer CLI's ${localEnv:HOME}
 # resolves to paths the host podman daemon can access
 args="${args} -e HOME=${MYHOME}"
 # mount in your own home dir in same folder for access to external files
@@ -75,49 +75,34 @@ args="${args} -e HOME=${MYHOME}"
 # for podman-outside-docker
 mounts="-v=/tmp:/tmp"
 
-# Mount GPU devices for hardware-accelerated rendering
-if [ -d /dev/dri ]; then
-  mounts="${mounts} --device /dev/dri:/dev/dri"
-fi
-# NVIDIA GPU support via CDI (requires nvidia-container-toolkit)
-if [ -e /dev/nvidia0 ]; then
-  mounts="${mounts} --device nvidia.com/gpu=all"
-fi
-
 # Add mounts only if they exist
 [ -d /scratch ] && mounts="${mounts} -v=/scratch:/scratch"
 [ -d /dls_sw ] && mounts="${mounts} -v=/dls_sw:/dls_sw"
-[ -d ${MYHOME}/.ssh ] && mounts="${mounts} -v=${MYHOME}/.ssh:${MYHOME}/.ssh"
-# Forward SSH agent for git authentication
 if [ -n "$SSH_AUTH_SOCK" ]; then
   mounts="${mounts} -v=${SSH_AUTH_SOCK}:${SSH_AUTH_SOCK} -e SSH_AUTH_SOCK=${SSH_AUTH_SOCK}"
 fi
 # Use named volume for .config to allow devcontainer CLI to create its own structure
 # while maintaining persistence across runs
-mounts="${mounts} -v=zed-config:${MYHOME}/.config"
+mounts="${mounts} -v=zed-config:/root/.config"
 # mount in the podman socket if it exists, for podman-outside-docker support
 [ -S ${XDG_RUNTIME_DIR}/podman/podman.sock ] && mounts="${mounts} -v=${XDG_RUNTIME_DIR}/podman/podman.sock:/var/run/docker.sock"
 # Always add these mounts, make cache and state be named volumes so they persist
-# across runs and don't require the host directories to exist (I also found
-# that this improves performance)
-mounts="${mounts} -v=zed-cache:${MYHOME}/.cache"
-mounts="${mounts} -v=zed-state:${MYHOME}/.local/share/zed"
+mounts="${mounts} -v=zed-cache:/root/.cache"
+mounts="${mounts} -v=zed-state:/root/.local/share/zed"
 mounts="${mounts} -v=${thisdir}:/workspace"
+# for podman outside podman to work we need the paths to be the same
+# so need home but also need to override .bashrc to avoid issues with host's .bashrc
 mounts="${mounts} -v=${MYHOME}:${MYHOME}"
-# Override host .bashrc with container-specific version
-mounts="${mounts} -v=${thisdir}/bashrc:${MYHOME}/.bashrc:ro"
-# mount in code config for VS Code so we can copy its settings
-[ -d ${MYHOME}/.config/Code ] && mounts="${mounts} -v=${MYHOME}/.config/Code:${MYHOME}/.config/Code:ro"
+# Override host's .bashrc with a container-specific prompt
+CONTAINER_BASHRC=$(mktemp /tmp/.zed-bashrc.XXXXXX)
+echo 'PS1="[zed] \w \$ "' > "${CONTAINER_BASHRC}"
+mounts="${mounts} -v=${CONTAINER_BASHRC}:${MYHOME}/.bashrc:ro"
 
 # Grant X11 access for local user
-if [ -n "$DISPLAY" ]; then
-  xhost +SI:localuser:$(id -un) 2>/dev/null || true
-fi
+xhost +SI:localuser:$(id -un) 2>/dev/null || true
 
-# Keep podman service alive during container execution
-podman ps > /dev/null 2>&1 &
-PODMAN_PID=$!
-trap "kill $PODMAN_PID 2>/dev/null" EXIT
+cleanup() { rm -f "${CONTAINER_BASHRC}"; }
+trap cleanup EXIT
 
 set -x
 $docker run ${mounts} ${args} ${x11} ${filtered_args} ${image}
