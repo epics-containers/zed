@@ -48,4 +48,5 @@ mounts="
 xhost +SI:localuser:$(id -un)
 
 set -x
-$docker run ${mounts} ${args} ${x11} ${@} ghcr.io/epics-containers/zed:main
+$docker run ${mounts} ${args} ${x11} ghcr.io/epics-containers/zed:main ${@}
+
